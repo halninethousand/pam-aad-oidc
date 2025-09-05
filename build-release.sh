@@ -44,7 +44,6 @@ fi
 echo "All dependencies found."
 echo
 
-# Clean any previous build artifacts
 echo "Cleaning previous build artifacts..."
 make clean 2>/dev/null || true
 echo
