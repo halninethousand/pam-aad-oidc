@@ -42,6 +42,13 @@ type ServicePrincipalResponse struct {
 	AppID       string `json:"appId"`
 }
 
+type DirectoryObjectResponse struct {
+	ID                string `json:"id"`
+	DisplayName       string `json:"displayName"`
+	Type              string `json:"@odata.type"`
+	UserPrincipalName string `json:"userPrincipalName,omitempty"` // Only present for users
+}
+
 type OpenIDConfig struct {
 	Issuer  string `json:"issuer"`
 	JwksUri string `json:"jwks_uri"`
@@ -114,33 +121,36 @@ func validateJWTCredentials(config *Config, username string, token string, log_p
 		return 7 // PAM_AUTH_ERR
 	}
 
-	// primary check: Get managed identity display name and compare with username
-	managedIdentityName, err := getManagedIdentityDisplayName(jwtOID)
+	// primary check: Get identity name (UPN for users, display name for managed identities) and compare with username
+	identityName, err := getDirectoryObjectIdentifier(jwtOID)
 	if err != nil {
-		log.Println(log_prefix, "Failed to get managed identity name:", err)
+		log.Println(log_prefix, "Failed to get identity name:", err)
 		return 8 // PAM_CRED_INSUFFICIENT
 	}
 
-	log.Println(log_prefix, "JWT managed identity:", managedIdentityName, "Username:", username)
+	log.Println(log_prefix, "JWT identity:", identityName, "Username:", username)
 
-	if managedIdentityName == username {
+	if identityName == username {
 		log.Println(log_prefix, "JWT authentication succeeded - direct match")
 		return 0 // PAM_SUCCESS
 	}
 
-	// secondary check: check if username is a group that the JWT managed identity belongs to
-	log.Println(log_prefix, "No direct match, checking if username is a group that JWT managed identity belongs to")
+	// secondary check: check if username is a group that the JWT identity belongs to
+	log.Println(log_prefix, "No direct match, checking if username is a group that JWT identity belongs to")
 
 	aadGroupNames, err := RetrieveAADGroupMembershipsViaIMDS(jwtOID)
 	if err != nil {
-		log.Println(log_prefix, "Failed to retrieve JWT managed identity group memberships:", err)
+		log.Println(log_prefix, "Failed to retrieve JWT identity group memberships:", err)
 		return 8 // PAM_CRED_INSUFFICIENT
 	}
 
-	// check if username matches any group that the JWT managed identity belongs to
+	log.Println(log_prefix, "identityName:", identityName, "username:", username)
+	log.Println(log_prefix, "aadGroupNames:", aadGroupNames)
+
+	// check if username matches any group that the JWT identity belongs to
 	for _, aadGroupName := range aadGroupNames {
 		if aadGroupName == username {
-			log.Println(log_prefix, "JWT authentication succeeded - username is a group that JWT managed identity belongs to")
+			log.Println(log_prefix, "JWT authentication succeeded - username is a group that JWT identity belongs to")
 			return 0 // PAM_SUCCESS
 		}
 	}
@@ -355,8 +365,24 @@ func RetrieveAADGroupMembershipsViaIMDS(userOID string) ([]string, error) {
 		return groupNames, fmt.Errorf("failed to get Graph API token: %v", err)
 	}
 
-	// Create request to get service principal's group memberships
-	graphURL := "https://graph.microsoft.com/v1.0/servicePrincipals/" + userOID + "/memberOf"
+	// determine the type of object (oid)
+	objectType, _, err := getDirectoryObjectType(userOID)
+	if err != nil {
+		return groupNames, fmt.Errorf("failed to determine object type: %v", err)
+	}
+
+	log.Printf("Directory Object Type: %s, OID: %s", objectType, userOID)
+
+	// determine the correct Graph API endpoint based on object type
+	var graphURL string
+	if objectType == "#microsoft.graph.user" {
+		graphURL = "https://graph.microsoft.com/v1.0/users/" + userOID + "/memberOf"
+	} else {
+		// default to servicePrincipals endpoint for managed identities
+		graphURL = "https://graph.microsoft.com/v1.0/servicePrincipals/" + userOID + "/memberOf"
+	}
+
+	// get object's group memberships
 	req, err := http.NewRequest("GET", graphURL, nil)
 	if err != nil {
 		return groupNames, err
@@ -364,7 +390,6 @@ func RetrieveAADGroupMembershipsViaIMDS(userOID string) ([]string, error) {
 	req.Header.Add("Authorization", "Bearer "+graphToken)
 
 	log.Printf("Graph API URL: %s", graphURL)
-	log.Printf("Service Principal OID being queried: %s", userOID)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -431,42 +456,66 @@ func getGraphTokenFromIMDS() (string, error) {
 	return tokenResponse.AccessToken, nil
 }
 
-// gets the display name of a managed identity using its OID
-func getManagedIdentityDisplayName(oid string) (string, error) {
+// determines the type of directory object (user, servicePrincipal, group, etc.)
+// returns: objectType, identifier (UPN for users, DisplayName for others), error
+func getDirectoryObjectType(oid string) (string, string, error) {
 	graphToken, err := getGraphTokenFromIMDS()
 	if err != nil {
-		return "", fmt.Errorf("failed to get Graph API token: %v", err)
+		return "", "", fmt.Errorf("failed to get Graph API token: %v", err)
 	}
 
-	graphURL := "https://graph.microsoft.com/v1.0/servicePrincipals/" + oid
+	graphURL := "https://graph.microsoft.com/v1.0/directoryObjects/" + oid
 	req, err := http.NewRequest("GET", graphURL, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Add("Authorization", "Bearer "+graphToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Graph API request failed with status %d: %s", resp.StatusCode, string(body))
+		return "", "", fmt.Errorf("Graph API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var response ServicePrincipalResponse
+	var response DirectoryObjectResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("failed to parse service principal response: %v", err)
+		return "", "", fmt.Errorf("failed to parse directory object response: %v", err)
 	}
 
-	return response.DisplayName, nil
+	// for users, return UPN; for managed identities and others return DisplayName
+	var identifier string
+	if response.Type == "#microsoft.graph.user" {
+		// extract just the username part before the @ or _
+		identifier = response.UserPrincipalName
+		if strings.Contains(identifier, "_") {
+			parts := strings.Split(identifier, "_")
+			identifier = parts[0]
+		}
+	} else {
+		identifier = response.DisplayName
+	}
+
+	return response.Type, identifier, nil
+}
+
+// gets the appropriate identifier for a directory object using its OID
+// Returns username from UPN for users, DisplayName for managed identities/service principals
+func getDirectoryObjectIdentifier(oid string) (string, error) {
+	_, identifier, err := getDirectoryObjectType(oid)
+	if err != nil {
+		return "", err
+	}
+	return identifier, nil
 }
 
 
