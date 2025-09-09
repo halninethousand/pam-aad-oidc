@@ -216,6 +216,23 @@ MySQL username == Group name that JWT managed identity belongs to → Success
 
 This allows managed identities to authenticate as groups they belong to, enabling flexible delegation scenarios.
 
+## User Authentication with UPN
+
+The module properly handles both regular Azure AD users and external users:
+
+### User Principal Name (UPN) Extraction
+- **Regular users**: Uses UPN (e.g., `john.doe@company.com`)
+- **External users**: Extracts username from complex UPN format
+  - Input: `gosho.ivanov_teladochealth.com#EXT#@tdhdev.onmicrosoft.com`
+  - Extracted: `gosho.ivanov` (part before the underscore)
+
+### Graph API Endpoint Selection
+The module automatically detects the directory object type and uses the correct Microsoft Graph API endpoint:
+- **Users**: `https://graph.microsoft.com/v1.0/users/{user-id}/memberOf`
+- **Service Principals/Managed Identities**: `https://graph.microsoft.com/v1.0/servicePrincipals/{sp-id}/memberOf`
+
+This ensures proper authentication for both human users and managed identities accessing the system.
+
 ## Security Considerations
 
 - **JWT Validation**: Full cryptographic verification using Azure AD public keys
