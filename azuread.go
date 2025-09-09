@@ -321,7 +321,7 @@ func validateJWTSignature(token string, tenantID string) (map[string]interface{}
 	}
 
 	// check audience (validate token is for our application)
-	expectedAud := "d24e142a-8920-4ccf-8412-6ddcf3cdb679"
+	expectedAud := config.Audience
 	tokenAuds := verifiedToken.Audience()
 	validAud := false
 	for _, aud := range tokenAuds {
