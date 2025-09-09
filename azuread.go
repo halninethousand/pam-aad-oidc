@@ -102,7 +102,7 @@ func isJWT(token string) bool {
 
 // validate JWT token and check group membership
 func validateJWTCredentials(config *Config, username string, token string, log_prefix string) int {
-	claims, err := validateJWTSignature(token, config.TenantID)
+	claims, err := validateJWTSignature(token, config.TenantID, config.Audience)
 	if err != nil {
 		log.Println(log_prefix, "JWT validation failed:", err)
 		return 7 // PAM_AUTH_ERR
@@ -206,7 +206,7 @@ func validatePasswordCredentials(config *Config, username string, password strin
 	return 6 // PAM_PERM_DENIED
 }
 
-func validateJWTSignature(token string, tenantID string) (map[string]interface{}, error) {
+func validateJWTSignature(token string, tenantID string, audience string) (map[string]interface{}, error) {
 	wellKnownURL := fmt.Sprintf("https://login.microsoftonline.com/%s/v2.0/.well-known/openid-configuration", tenantID)
 	resp, err := http.Get(wellKnownURL)
 	if err != nil {
@@ -321,7 +321,7 @@ func validateJWTSignature(token string, tenantID string) (map[string]interface{}
 	}
 
 	// check audience (validate token is for our application)
-	expectedAud := config.Audience
+	expectedAud := audience
 	tokenAuds := verifiedToken.Audience()
 	validAud := false
 	for _, aud := range tokenAuds {
