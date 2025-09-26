@@ -68,7 +68,7 @@ This PAM module provides dual-environment authentication - it works seamlessly o
   az login --federated-token "$COGNITO_JWT" --service-principal -u "$AZURE_CLIENT_ID"
 
   # 3. Get Azure AD token for our application
-  AZURE_ACCESS_TOKEN=$(az account get-access-token --resource "api://755d3f85-e44b-4e2a-ab88-55b0c7689017")
+  AZURE_ACCESS_TOKEN=$(az account get-access-token --resource "") # insert as resource your api endpoint of the app
 
   # 4. Use Azure token as MySQL password
   mysql -u "$MYSQL_USER" -p"$AZURE_ACCESS_TOKEN"
@@ -85,7 +85,7 @@ This PAM module provides dual-environment authentication - it works seamlessly o
   2. PAM-side exchange: Gets Azure AD token with Graph audience (for identity/group lookups)
 
   Key Insight: We need two different tokens:
-  - Authentication token: Audience = application (755d3f85-e44b-4e2a-ab88-55b0c7689017)
+  - Authentication token: Audience = application (api client id)
   - Graph API token: Audience = Microsoft Graph (https://graph.microsoft.com)
 
   ---
@@ -95,14 +95,14 @@ This PAM module provides dual-environment authentication - it works seamlessly o
 
   # Managed Identity with federated credential
   resource "azurerm_federated_identity_credential" "aws_cognito_federation" {
-    audience  = ["eu-west-2:9937d6dc-ccaa-4097-9760-886658452cc0"]  # Cognito Pool ID
+    audience  = ["<<AWS_cognito_identity_pool"]  # Cognito Pool ID
     issuer    = "https://cognito-identity.amazonaws.com"
-    subject   = "eu-west-2:93b0e27e-def9-c7bf-398f-f01d73cd746e"   # Cognito Identity ID
+    subject   = "<<AWS identity>>"   # Cognito Identity ID
   }
 
   # App Registration for MySQL authentication
   resource "azuread_application_registration" "mysql_srv" {
-    display_name = "tdoc-mysqlauth-srv"
+    display_name = "mysql_srv"
   }
 
   AWS Side:
@@ -172,7 +172,7 @@ This PAM module provides dual-environment authentication - it works seamlessly o
 
   1. Audience Strategy
 
-  - App token audience: 755d3f85-e44b-4e2a-ab88-55b0c7689017 (for authentication)
+  - App token audience: api token (for authentication)
   - Graph token audience: https://graph.microsoft.com (for API access)
 
   2. MiID Usage
@@ -210,17 +210,17 @@ This PAM module provides dual-environment authentication - it works seamlessly o
 
   Scenario 1: Pure Azure VM
 
-  tenant-id = "f976abbe-fa68-4d4f-bcf7-7038d98c8385"
-  audience = "755d3f85-e44b-4e2a-ab88-55b0c7689017"
+  tenant-id = "UUID of tenant"
+  audience = "app client id"
   # No AWS config needed - IMDS handles everything
 
   Scenario 2: AWS EC2 with Federation
 
-  tenant-id = "f976abbe-fa68-4d4f-bcf7-7038d98c8385"
-  audience = "755d3f85-e44b-4e2a-ab88-55b0c7689017"
-  mi_id = "7ae70a4d-ceb3-45cc-b15b-1c3aba6ef231"     # Azure managed identity
-  cognito-pool-id = "eu-west-2:9937d6dc-ccaa-4097-9760-886658452cc0"
-  cognito-region = "eu-west-2"
+  tenant-id = "tenant id"
+  audience = "app client id"
+  mi_id = "managed identity id"     # Azure managed identity
+  cognito-pool-id = "cognito pool id"
+  cognito-region = "aws region"
 
   Scenario 3: Hybrid Multi-Cloud
 
