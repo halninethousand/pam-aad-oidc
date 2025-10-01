@@ -1,5 +1,4 @@
 # pam-aad-oidc
-# asdfasdfasdf
 [![made-with-Go](https://img.shields.io/badge/Made%20with-Go-1f425f.svg)](https://go.dev/)
 [![Go version](https://img.shields.io/github/go-mod/go-version/alan-turing-institute/pam-aad-oidc.svg)](https://github.com/alan-turing-institute/pam-aad-oidc)
 [![Go Report Card example](https://goreportcard.com/badge/github.com/alan-turing-institute/pam-aad-oidc)](https://goreportcard.com/report/github.com/alan-turing-institute/pam-aad-oidc)
